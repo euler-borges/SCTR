@@ -1,0 +1,75 @@
+# Diretórios de ambiente virtual
+venv/
+.env/
+.venv/
+env/
+
+# Bytecode do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arquivos de log e temporários
+*.log
+*.tmp
+*.swp
+*.bak
+
+# Arquivos de configuração do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Arquivos de cache de pacotes
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Arquivos de IDEs/editores
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Arquivos de testes
+htmlcov/
+.coverage
+.cache/
+.pytest_cache/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+*.pytest_cache/
+
+# Build
+build/
+dist/
+*.egg-info/
+.eggs/
+MANIFEST
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Arquivos do mypy
+.mypy_cache/
+
+# Arquivos do Pyre
+.pyre/
+
+# Arquivos do Pylint
+.pylint.d/
+
+# Arquivos do Cython
+cython_debug/
+
+
+my_secrets.py
+
+*.jpg
+
+*.pt
+
+my_secrets.py
+my_secrets.*
+secrets.*
