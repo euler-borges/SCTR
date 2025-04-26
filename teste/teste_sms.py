@@ -9,10 +9,12 @@ account_sid = account_sid
 auth_token = auth_token
 client = Client(account_sid, auth_token)
 
-message = client.messages.create(
-    body="This is the ship that made the Kessel Run in fourteen parsecs?",
-    from_=twilio_number,
-    to=my_number,
-)
-
-print(message.body)
+try:
+    message = client.messages.create(
+        body="This is the ship that made the Kessel Run in fourteen parsecs?",
+        from_=twilio_number,
+        to=my_number,
+    )
+    print(message.body) 
+except Exception as e:
+    print("Deu ruim")

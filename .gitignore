@@ -70,6 +70,4 @@ my_secrets.py
 
 *.pt
 
-my_secrets.py
-my_secrets.*
-secrets.*
+*secret*

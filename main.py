@@ -1,7 +1,8 @@
+import logging
 
-def init():
-    teste_rede()
-    teste_cameras()
+from init.init import init
+from process.process import process
+
 
 def main():
     init()
