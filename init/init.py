@@ -2,6 +2,8 @@ from ping3 import ping
 import os
 import logging
 import time
+import cv2
+import numpy as np
 
 
 def iniciar_logging():
@@ -13,22 +15,39 @@ def iniciar_logging():
     )
 
 
-
-def myping(host):
-    resp = ping(host)
-
-    return resp
-
-
-
 def teste_rede():
-    while (not myping("www.google.com")):
+    while (not ping("www.google.com")):
         logging.warning("Rede não está funcionando. Tentando novamente em 15 segundos")
         time.sleep(15)
     logging.info("Rede encontrada")
 
+
 def teste_cameras():
-    pass
+    active_cameras = []
+    def todos_os_pix_iguais(frame):
+        # Compara todos os pixels com o primeiro pixel
+        return np.all(frame == frame[0, 0])
+
+    for i in range(10):
+        cap = cv2.VideoCapture(i)
+
+        if cap.isOpened():
+            logging.info(f"Câmera {i} encontrada aberta.")
+        
+            ret, frame = cap.read()
+            if not ret or frame is None or frame.size == 0:
+                logging.error(f"Câmera {i} sem frame válido.")
+            elif todos_os_pix_iguais(frame):
+                cor = frame[0, 0]
+                logging.error(f"Câmera {i} retornou uma imagem de cor única: {cor}")
+            else:
+                logging.info(f"Câmera {i} está funcionando e tem imagem com conteúdo variado")
+                active_cameras.append(i)
+        else:
+            logging.warning(f"Câmera {i} não abriu.")
+
+        cap.release()
+
 
 def init():
     iniciar_logging()
