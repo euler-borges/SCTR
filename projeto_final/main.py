@@ -5,8 +5,8 @@ from process.process import process
 
 
 def main():
-    cameras = init()
-    process(cameras)
+    client, cameras  = init()
+    process(client, cameras)
 
 
 
