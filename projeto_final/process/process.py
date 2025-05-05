@@ -9,8 +9,10 @@ from twilio.rest import Client
 from my_secrets.my_secrets import twilio_number, my_number
 
 #definindo os locks e conditionals necessários para o funcionamento do sistema
-lock_condition = threading.Lock()
-cond_fill = threading.Condition(lock_condition)
+lock_condition_alarm_buffer = threading.Lock()
+cond_fill_alarm_buffer = threading.Condition(lock_condition_alarm_buffer)
+lock_condition_sent_buffer = threading.Lock()
+cond_fill_sent_buffer = threading.Condition(lock_condition_sent_buffer)
 
 # Variaveis globais para o processamento de imagens
 target_class = 0 #classe alvo: pessoa
@@ -19,20 +21,33 @@ alert_threshold = 10  # Número de frames com detecção necessários para gerar
 # Variaveis para armazzenar alarmes e permitir comunicação entre as threads
 # alarm_buffer_count = 0  # Contador de alarmes
 alarm_buffer = []  # Buffer para armazenar alarmes
+sent_buffer = []  # Buffer para armazenar mensagens enviados
 
-
-def send_sms_twilio(client, message):
+def send_sms_twilio(client, text_message):
+    global sent_buffer
+    global alarm_buffer
     try:
         message = client.messages.create(
-            body=message,
+            body=text_message,
             from_=twilio_number,
             to=my_number,
         )
-        ###TRATAR A SITUAÇÃO DO SMS###
+        
+        # Adiciona a mensagem ao buffer de mensagens enviadas
+        with cond_fill_sent_buffer:
+            sent_buffer.append((message, text_message))
+            # Notifica a thread de confirmação de mensagens enviadas
+            cond_fill_sent_buffer.notify()
+            logging.info(f"Mensagem enviada para servidor Twilio: {message.sid}")
+        return True  # Retorna True se a mensagem foi enviada com sucesso
+    
     #para caso de erro no envio da mensagem
     except Exception as e:
-        alarm_buffer.append(message)
+        with cond_fill_alarm_buffer:
+            alarm_buffer.append(text_message)
+
         logging.error(f"Erro ao enviar SMS: {e}")
+        return False
 
 
 def alarm_thread_func(twilio_client):
@@ -41,37 +56,61 @@ def alarm_thread_func(twilio_client):
 
 
     while True:
-        with cond_fill:
+        alarm_message = None
+        with cond_fill_alarm_buffer:
             while not alarm_buffer:
-                cond_fill.wait()
+                cond_fill_alarm_buffer.wait()
 
             # Processa o buffer de alarmes
             while alarm_buffer:
                 alarm_message = alarm_buffer.pop(0)
                 #teste 
                 # logging.info(f"Alarme: {alarm}")
+                # Envia o alarme via SMS
                 send_sms_twilio(twilio_client, alarm_message)
 
 
+def confirm_sent_thread_func(twilio_client):
+    global sent_buffer
+    while True:
+        with cond_fill_sent_buffer:
+            while not sent_buffer:
+                cond_fill_sent_buffer.wait()
 
+            # Processa o buffer de mensagens enviadas
+            while sent_buffer:
+                message, text_message = sent_buffer.pop(0)
+                # Verifica o status da mensagem
+                message = twilio_client.messages(message.sid).fetch()
 
+                while message.status not in ["undelivered", "delivered", "failed"]:
+                    time.sleep(5)
+                    message = twilio_client.messages(message.sid).fetch()
+
+                if message.status == "undelivered" or message.status == "failed":
+                    logging.info(f"Mensagem não entregue: {message.sid}")
+                    with cond_fill_alarm_buffer:
+                        alarm_buffer.append(text_message)
+                        cond_fill_alarm_buffer.notify()
+                else:
+                    logging.info(f"Mensagem entregue: {message.sid}")
+                
 
 def camera_thread_func(camera_id, model):
     global alarm_buffer
     logging.info(f"Iniciando thread para câmera {camera_id}")
-    alert_state = False
     frames_with_alert = 0
 
     cap = cv2.VideoCapture(camera_id)
 
     if not cap.isOpened():
-        print(f"Erro ao abrir câmera {camera_id}")
+        logging.error(f"Erro ao abrir câmera {camera_id}")
         return
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            print(f"Falha na captura da câmera {camera_id}")
+            logging.error(f"Falha na captura da câmera {camera_id}")
             break
 
         # Processa a imagem com YOLO
@@ -84,9 +123,10 @@ def camera_thread_func(camera_id, model):
                     # Registra a detecção
                     frames_with_alert = 0
                     
-                    with cond_fill:
-                        alarm_buffer.append(f"{datetime.now().strftime("%d-%m-%Y %H:%M:%S")}: Alerta na câmera {camera_id}.")
-                        cond_fill.notify()
+                    with cond_fill_alarm_buffer:
+                        alarm_buffer.append(f"{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}: Alerta na câmera {camera_id}.")
+                        logging.info(f"Alerta na câmera {camera_id}.")
+                        cond_fill_alarm_buffer.notify()
                     
                     time.sleep(30)  # Espera um pouco para evitar múltiplos alarmes
                 break  # registra uma vez por frame com detecção
@@ -105,9 +145,16 @@ def process(twilio_client, active_cameras):
     #inicia a thread de alarme
     logging.info("Iniciando thread de alarme")
     # Cria e inicia a thread de alarme
-    thread_alarm = threading.Thread(target=alarm_thread_func, args=(twilio_client))
+    thread_alarm = threading.Thread(target=alarm_thread_func, args=(twilio_client,))
     thread_alarm.start()
 
+    #inicia a thread de confirmação de mensagens enviadas
+    logging.info("Iniciando thread de confirmação de mensagens enviadas")
+    # Cria e inicia a thread de confirmacao de mensagens enviadas
+    thread_confirm = threading.Thread(target=confirm_sent_thread_func, args=(twilio_client,))
+    thread_confirm.start()
+
+    #inicia as threads de camera
     threads_camera = []
     for i, camera_id in enumerate(active_cameras):
         thread = threading.Thread(target=camera_thread_func, args=(camera_id, YOLO_MODELS[i]))
