@@ -3,9 +3,12 @@ import logging
 import time
 import cv2
 import threading
+import requests.exceptions
+
 from datetime import datetime
 from ultralytics import YOLO
 from twilio.rest import Client
+
 from my_secrets.my_secrets import twilio_number, my_number
 
 #definindo os locks e conditionals necessários para o funcionamento do sistema
@@ -13,6 +16,8 @@ lock_condition_alarm_buffer = threading.Lock()
 cond_fill_alarm_buffer = threading.Condition(lock_condition_alarm_buffer)
 lock_condition_sent_buffer = threading.Lock()
 cond_fill_sent_buffer = threading.Condition(lock_condition_sent_buffer)
+
+stop_event = threading.Event()
 
 # Variaveis globais para o processamento de imagens
 target_class = 0 #classe alvo: pessoa
@@ -47,6 +52,7 @@ def send_sms_twilio(client, text_message):
             alarm_buffer.append(text_message)
 
         logging.error(f"Erro ao enviar SMS: {e}")
+        time.sleep(5)  # Espera 5 segundos antes de tentar novamente
         return False
 
 
@@ -55,47 +61,50 @@ def alarm_thread_func(twilio_client):
     global alarm_buffer
 
 
-    while True:
-        alarm_message = None
+    while not stop_event.is_set():
         with cond_fill_alarm_buffer:
             while not alarm_buffer:
                 cond_fill_alarm_buffer.wait()
 
+            local_buffer = alarm_buffer[:]
+            alarm_buffer.clear()
+
             # Processa o buffer de alarmes
-            while alarm_buffer:
-                alarm_message = alarm_buffer.pop(0)
-                #teste 
-                # logging.info(f"Alarme: {alarm}")
-                # Envia o alarme via SMS
-                send_sms_twilio(twilio_client, alarm_message)
+        
+        for alarm_message in local_buffer:
+            send_sms_twilio(twilio_client, alarm_message)
 
 
 def confirm_sent_thread_func(twilio_client):
     global sent_buffer
-    while True:
+    while not stop_event.is_set():
         with cond_fill_sent_buffer:
-            while not sent_buffer:
+            while not sent_buffer and not stop_event.is_set():
                 cond_fill_sent_buffer.wait()
+            local_sent = sent_buffer[:]
+            sent_buffer.clear()
 
             # Processa o buffer de mensagens enviadas
-            while sent_buffer:
-                message, text_message = sent_buffer.pop(0)
-                # Verifica o status da mensagem
-                message = twilio_client.messages(message.sid).fetch()
-
-                while message.status not in ["undelivered", "delivered", "failed"]:
-                    time.sleep(5)
+        for message, text_message in local_sent:
+            # Verifica o status da mensagem
+        
+            while message.status not in ["undelivered", "delivered", "failed"] and not stop_event.is_set():
+                try:
                     message = twilio_client.messages(message.sid).fetch()
-
-                if message.status == "undelivered" or message.status == "failed":
-                    logging.info(f"Mensagem não entregue: {message.sid}")
-                    with cond_fill_alarm_buffer:
-                        alarm_buffer.append(text_message)
-                        cond_fill_alarm_buffer.notify()
-                else:
-                    logging.info(f"Mensagem entregue: {message.sid}")
+                except Exception as e:
+                    logging.error(f"Erro ao verificar status da mensagem: {e}")
                 
+                time.sleep(5)
 
+            if message.status == "undelivered" or message.status == "failed":
+                logging.info(f"Mensagem não entregue: {message.sid}")
+                with cond_fill_alarm_buffer:
+                    alarm_buffer.append(text_message)
+                    cond_fill_alarm_buffer.notify()
+            else:
+                logging.info(f"Mensagem entregue: {message.sid}")
+            
+ 
 def camera_thread_func(camera_id, model):
     global alarm_buffer
     logging.info(f"Iniciando thread para câmera {camera_id}")
@@ -107,7 +116,7 @@ def camera_thread_func(camera_id, model):
         logging.error(f"Erro ao abrir câmera {camera_id}")
         return
 
-    while True:
+    while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
             logging.error(f"Falha na captura da câmera {camera_id}")
@@ -160,3 +169,24 @@ def process(twilio_client, active_cameras):
         thread = threading.Thread(target=camera_thread_func, args=(camera_id, YOLO_MODELS[i]))
         threads_camera.append(thread)
         thread.start()
+
+
+    try:
+        while True:
+            time.sleep(1)  # mantém a thread principal viva
+    except KeyboardInterrupt:
+        logging.info("Encerrando sistema...")
+
+        stop_event.set()
+
+        with cond_fill_alarm_buffer:
+            cond_fill_alarm_buffer.notify_all()
+        with cond_fill_sent_buffer:
+            cond_fill_sent_buffer.notify_all()
+
+        thread_alarm.join()
+        thread_confirm.join()
+        for t in threads_camera:
+            t.join()
+
+        logging.info("Sistema encerrado com segurança.")

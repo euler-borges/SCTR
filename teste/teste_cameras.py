@@ -18,11 +18,14 @@ for i in range(10):
     elif todos_os_pix_iguais(frame):
         cor = frame[0, 0]
         print(f"⚠️ Câmera {i} retornou uma imagem de cor única: {cor}")
+        cv2.imshow(f'Câmera {i}', frame)
+        cv2.waitKey(1000)
+        cv2.destroyAllWindows()
     else:
         print(f"✅ Câmera {i} está funcionando e tem imagem com conteúdo variado!")
         # Mostra o frame rapidamente
         cv2.imshow(f'Câmera {i}', frame)
-        cv2.waitKey(1000)
+        cv2.waitKey(500)
         cv2.destroyAllWindows()
 
     cap.release()
