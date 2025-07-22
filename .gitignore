@@ -71,3 +71,7 @@ my_secrets.py
 *.pt
 
 *secret*
+
+teste/*
+
+pratica_1_minha/*
